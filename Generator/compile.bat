@@ -1,0 +1,1 @@
+gcc -g -o mod_generator.exe mod_generator.c
