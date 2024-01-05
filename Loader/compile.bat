@@ -1,0 +1,1 @@
+gcc -g -o DKCedit.exe main.c

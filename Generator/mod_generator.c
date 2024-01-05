@@ -5,10 +5,10 @@
 #define COMPILE_COMMAND "gcc -S -masm=intel "
 #define MAX_PATH 256
 
-const char* header_code[14] = {
+const char* header_code[15] = {
     "\tnop rcx\n\t", "push rax\n\t", "push rbx\n\t", "push rcx\n\t", "push rdx\n\t", 
 	"push rsi\n\t", "push rdi\n\t", "push r8\n\t", "push r9\n\t", "push r10\n\t", 
-    "push r11\n\t", "push r12\n\t", "push r13\n\t", "push r14\n",
+    "push r11\n\t", "push r12\n\t", "push r13\n\t", "push r14\n\t", "push r15\n"
 };
 
 const char* ending_code[25] = {
@@ -54,7 +54,7 @@ int main(int argc, char* argv[]){
         if(strcmp(file_buffer, "mod_main:\n") == 0){
             fwrite(file_buffer, strlen(file_buffer), 1, gen_source);
             printf("mod_main found\n");
-            for(int i = 0; i < 14; i++){
+            for(int i = 0; i < 15; i++){
                 fwrite(header_code[i], strlen(header_code[i]), 1, gen_source);
             }
         }

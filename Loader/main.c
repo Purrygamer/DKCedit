@@ -5,9 +5,9 @@
 #include <unistd.h>
 
 #define GAME_NAME "DkkStm.exe"
-#define BUILD_VER "DKCedit: Ver 0.8 .%04d.%02d/%02d %s"
-#define BUILD_DATE "Dec 22 2023"
-#define BUILD_TIME "01:14:24"
+#define BUILD_VER "DKCedit: Ver 1.0 .%04d.%02d/%02d %s"
+#define BUILD_DATE "Jan 04 2024"
+#define BUILD_TIME "19:33:06"
 
 #define OLD_DATE_OFFSET 0x4B47D8
 #define OLD_TIME_OFFSET 0x4B47F8
@@ -133,7 +133,7 @@ void main(){
     printf("    \\::/  /       \\:\\__\\        \\::/  /       \\::/  /       \\::/  /        /:/  /       \\:\\__\\  \n");
     printf("     \\/__/         \\/__/         \\/__/         \\/__/         \\/__/         \\/__/         \\/__/  \n");
     printf("Version: ");
-    printf("0.8\n");
+    printf("1.0\n");
     printf("Input the file path to %s\n", GAME_NAME);
     char input[MAX_STRING];
     fgets(input, 200, stdin);
@@ -221,6 +221,7 @@ void load_mod(FILE* game){
     uint8_t cur_byte;
     uint32_t new_code_start;
     uint32_t cur_instruction_addr;
+    uint32_t file_address;
     printf("Checking if mod files exist... ");
     if (variables = fopen("variables.txt", "r")){
     } else{
@@ -243,7 +244,7 @@ void load_mod(FILE* game){
     uint32_t space_used;
     fread(&space_used, sizeof(uint32_t), 1, game);
     printf("phys: %x | virt %x\n", DEFAULT_MOD_START + space_used, DEFAULT_MOD_START_VIRT + space_used);
-    
+    file_address = DEFAULT_MOD_START + space_used;
     cur_instruction_addr = DEFAULT_MOD_START_VIRT + space_used;
     new_code_start = DEFAULT_MOD_START_VIRT + space_used;
     uint8_t nop_finder[4];
@@ -252,10 +253,17 @@ void load_mod(FILE* game){
     while(fread(&cur_byte, 1, 1, mod) == 1) {
         shuffle_nop_finder(nop_finder, cur_byte);
         if(check_nop_rax(nop_finder)) {
-            //Put in call (0xE8) byte
+            //Don't forget the last nop byte
             fwrite(&cur_byte, 1, 1, game);
             space_used++;
             cur_instruction_addr++;
+            file_address++;
+            //Put in call (0xE8) byte
+            fread(&cur_byte, 1, 1, mod);
+            fwrite(&cur_byte, 1, 1, game);
+            space_used++;
+            cur_instruction_addr++;
+            file_address++;
             //Do call instruction
             char call_virt[255];
             if(fgets(call_virt, 255, functions) == NULL){
@@ -275,15 +283,29 @@ void load_mod(FILE* game){
             printf("Call offset generated: %x\n", call_offset);
             space_used += 4;
             cur_instruction_addr += 4;
+            file_address += 4;
         } else if (check_nop_rbx(nop_finder)) {
-            //First two bytes of mov inst
+            //Don't forget the last nop byte
             fwrite(&cur_byte, 1, 1, game);
             space_used++;
             cur_instruction_addr++;
+            file_address++;
+            //First three bytes of mov inst
             fread(&cur_byte, 1, 1, mod);
             fwrite(&cur_byte, 1, 1, game);
             space_used++;
             cur_instruction_addr++;
+            file_address++;
+            fread(&cur_byte, 1, 1, mod);
+            fwrite(&cur_byte, 1, 1, game);
+            space_used++;
+            cur_instruction_addr++;
+            file_address++;
+            fread(&cur_byte, 1, 1, mod);
+            fwrite(&cur_byte, 1, 1, game);
+            space_used++;
+            cur_instruction_addr++;
+            file_address++;
             //Do variable
             char var_virt[255];
             if(fgets(var_virt, 255, variables) == NULL){
@@ -303,10 +325,13 @@ void load_mod(FILE* game){
             printf("Variable offset generated: %x\n", var_offset);
             space_used += 4;
             cur_instruction_addr += 4;
+            file_address += 4;
+
         } else if(check_nop_rcx(nop_finder)) {
             fwrite(&cur_byte, 1, 1, game);
             space_used++;
             cur_instruction_addr++;//finish out nop
+            file_address++;
             printf("Replacing old call pointer...");
             char physical_buffer[255];
             char virtual_buffer[255];
@@ -333,16 +358,19 @@ void load_mod(FILE* game){
             int offset = cur_instruction_addr - target_address;
             fwrite(&offset, sizeof(int), 1, game);
             printf("%x\n", offset);
-            fseek(game, cur_instruction_addr, SEEK_SET);
+            fseek(game, file_address, SEEK_SET);
         } else{
             fwrite(&cur_byte, 1, 1, game);
             space_used++;
             cur_instruction_addr++;
+            file_address++;
         }
     }
     printf("ok\n");
     mod_end:
     printf("Mod injected, closing files\n");
+    fseek(game, MOD_SIZE_ADDR, SEEK_SET);
+    fwrite(&space_used, sizeof(uint32_t), 1, game);
     fclose(mod);
     fclose(functions);
     fclose(variables);
