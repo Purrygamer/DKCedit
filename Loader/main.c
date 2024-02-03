@@ -3,9 +3,10 @@
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
+#include "../Generator/generator.h"
 
 #define GAME_NAME "DkkStm.exe"
-#define BUILD_VER "DKCedit: Ver 1.0 .%04d.%02d/%02d %s"
+#define BUILD_VER "DKCedit: Ver 1.1 .%04d.%02d/%02d %s"
 #define BUILD_DATE "Jan 04 2024"
 #define BUILD_TIME "19:33:06"
 
@@ -14,37 +15,10 @@
 #define OLD_STRING_OFFSET 0x279C7
 #define NEW_STRING_OFFSET 0x00ADCA35
 
-#define NEW_ATTACK_TEXT "Attack ("
-#define NEW_ATTACK_CODE_PHYSICAL 0x5DEA28
-#define NEW_ATTACK_CODE_VIRTUAL 0xB05028
-#define NEW_ATTACK_TEXT_PHYSICAL 0x5DEAC5
-#define NEW_ATTACK_VIRTUAL 0xB050C5
-#define PHYSICAL_PREDICTION_OFFSET 0x172B0E
-#define VIRTUAL_PREDICTION_OFFSET 0x173712
-#define ORIG_PREDICTION_CALL_PHYSICAL 0x17923C
-#define ORIG_PREDICTION_CALL_VIRTUAL 0x179E40
-#define PREDICT_MENU_CODE 0x173340
-#define CODE_JUMP_BYTES NEW_ATTACK_CODE_VIRTUAL - ORIG_PREDICTION_CALL_VIRTUAL
-#define JUMP_BYTES NEW_ATTACK_VIRTUAL - VIRTUAL_PREDICTION_OFFSET
-
 #define MOD_SIZE_ADDR 0x5DEA24
-
-const unsigned char damage_mod[] =
-    { 0x50, 0x53, 0x51, 0x52, 0x48, 0x8B, 0x05, 0x69, 0x36, 0xD2, 0xFF, 0x90, 0x8B, 0x80, 0x04, 0x1D,
-    0x00, 0x00, 0x90, 0x48, 0x8D, 0x1D, 0x8F, 0x00, 0x00, 0x00, 0x48, 0x31, 0xD2, 0x48, 0xC7, 0xC1,
-    0xE8, 0x03, 0x00, 0x00, 0x48, 0xF7, 0xF1, 0x48, 0x83, 0xC0, 0x30, 0x88, 0x03, 0x48, 0xFF, 0xC3,
-    0x48, 0x89, 0xD0, 0x48, 0x31, 0xD2, 0x48, 0xC7, 0xC1, 0x64, 0x00, 0x00, 0x00, 0x48, 0xF7, 0xF1,
-    0x48, 0x83, 0xC0, 0x30, 0x88, 0x03, 0x48, 0xFF, 0xC3, 0x48, 0x89, 0xD0, 0x48, 0x31, 0xD2, 0x48,
-    0xC7, 0xC1, 0x0A, 0x00, 0x00, 0x00, 0x48, 0xF7, 0xF1, 0x48, 0x83, 0xC0, 0x30, 0x48, 0x83, 0xC2,
-    0x30, 0x88, 0x03, 0x88, 0x53, 0x01, 0xB2, 0x29, 0x88, 0x53, 0x02, 0x5A, 0x59, 0x5B, 0x58, 0x48,
-    0x89, 0x05, 0x3D, 0x00, 0x00, 0x00, 0x58, 0x48, 0x89, 0x05, 0x3D, 0x00, 0x00, 0x00, 0x48, 0x8B,
-    0x05, 0x2E, 0x00, 0x00, 0x00, 0xE8, 0x92, 0xE2, 0x66, 0xFF, 0x48, 0x89, 0x05, 0x22, 0x00, 0x00,
-    0x00, 0x48, 0x8B, 0x05, 0x23, 0x00, 0x00, 0x00, 0x50, 0x48, 0x8B, 0x05, 0x13, 0x00, 0x00, 0x00, 0xC3 };
-
 
 
 #define MAX_STRING 255
-#define COUNTER_MAGIC 0x520F60
 #define SECTION_OFFSET 0x15E
 #define SECTION_HEADER_OFFSET 0x378
 #define DEFAULT_SECTIONS 7
@@ -60,9 +34,24 @@ const unsigned char damage_mod[] =
 #define DEFAULT_MOD_START 0x5DEA28
 #define DEFAULT_MOD_START_VIRT 0xB05028
 
+typedef enum COMMAND {
+    HELP,
+    ERROR,
+    EXIT,
+    LOAD,
+    GENERATE,
+} COMMAND;
+
 unsigned char prompt_user(char* text);
-void attack_calculator_mod(FILE* game);
+
 void load_mod(FILE* game);
+
+void loader_loop();
+
+COMMAND get_cli_input(char* buf, int size);
+
+void process_input(char* buf, COMMAND type);
+
 void newline_remover(char* input){
     for(int i = 0; i < MAX_STRING; i++){
         if(input[i] == '\n'){
@@ -119,8 +108,7 @@ void mod_bootloader(FILE *game){
     fwrite(&new_jump, sizeof(uint32_t), 1, game);
 }
 
-void main(){
-    //system("COLOR 05");
+int main(int argc, char* argv[]){
     printf("                    ___           ___           ___                                             \n");
     printf("     _____         /|  |         /\\__\\         /\\__\\         _____                              \n");
     printf("    /::\\  \\       |:|  |        /:/  /        /:/ _/_       /::\\  \\       ___           ___     \n");
@@ -133,66 +121,13 @@ void main(){
     printf("    \\::/  /       \\:\\__\\        \\::/  /       \\::/  /       \\::/  /        /:/  /       \\:\\__\\  \n");
     printf("     \\/__/         \\/__/         \\/__/         \\/__/         \\/__/         \\/__/         \\/__/  \n");
     printf("Version: ");
-    printf("1.0\n");
-    printf("Input the file path to %s\n", GAME_NAME);
-    char input[MAX_STRING];
-    fgets(input, 200, stdin);
-    newline_remover(input);
-    strcat(input, "\\");
-    strcat(input, GAME_NAME);
-    printf("%s\n", input);
-    FILE *game;
-    if (game = fopen(input, "rb+")){
-    } else{
-        printf("Invalid filename\n");
-        exit(-1);
+    printf("1.1\n");
+    printf("Type a command to get started... (type help or h for information)\n");
+    while(1) {
+        char buffer[MAX_STRING];
+        COMMAND input = get_cli_input(buffer, MAX_STRING);
+        process_input(buffer, input);
     }
-    fseek(game, SECTION_OFFSET, SEEK_SET);
-    short sections;
-    fread(&sections, 2, 1, game);
-    printf("Sections found = %d\n", sections);
-    
-    if(sections == DEFAULT_SECTIONS){
-        default_prompt:
-        printf("Default amount of sections in PE found. Would you like to run the mod initializer?\n(y / n)\n");
-        fgets(input, 10, stdin);
-        newline_remover(input);
-        if(input[0] != 'y' && input[0] != 'n'){
-            printf("Invalid option type y or n\n");
-            goto default_prompt;
-        }else if(input[0] == 'y'){
-            mod_bootloader(game);
-        }
-    } else {
-        char old_path[256];
-        getcwd(old_path, 256);
-        mod_loop:; //C syntax (╯°□°)╯︵ ┻━┻
-        unsigned char more_prompt = prompt_user("This file has already been modded. Would you like to add more mods?\n");
-        if(!more_prompt) {
-            goto finish;
-        }
-        printf("Input the file path to the mod folder (path must be <200 characters)\n");
-        fgets(input, 200, stdin);
-        newline_remover(input);
-        if(chdir(input) != 0) {
-            printf("Invalid path. Include the full path\n");
-            goto mod_loop;
-        }
-        load_mod(game);
-        chdir(old_path);
-        goto mod_loop;
-    }
-    /*
-    unsigned char prompted = prompt_user("Would you like the attack calculator mod? (y/n)");
-    if(!prompted){
-        goto finish;
-    }
-    attack_calculator_mod(game);
-    */
-finish:
-    fclose(game);
-    printf(":3\n");
-
 }
 
 uint8_t check_nop_rax(uint8_t buffer[4]){
@@ -391,20 +326,100 @@ unsigned char prompt_user(char* text) {
     return 0;
 }
 
-void attack_calculator_mod(FILE* game){
-    printf("Beginning attack calculator mod\n");
-    fseek(game, NEW_ATTACK_TEXT_PHYSICAL, SEEK_SET);
-    char new_attack[] = NEW_ATTACK_TEXT;
-    fwrite(new_attack, sizeof(new_attack), 1, game);
-    printf("Overwriting original string pointer\n");
-    fseek(game, PHYSICAL_PREDICTION_OFFSET, SEEK_SET);
-    uint32_t new_jump = JUMP_BYTES;
-    fwrite(&new_jump, sizeof(uint32_t), 1, game);
-    printf("Writing new code\n");
-    fseek(game, NEW_ATTACK_CODE_PHYSICAL, SEEK_SET);
-    fwrite(damage_mod, sizeof(damage_mod), 1, game);
-    printf("Overwriting prediction menu call");
-    fseek(game, ORIG_PREDICTION_CALL_PHYSICAL, SEEK_SET);
-    uint32_t new_call = CODE_JUMP_BYTES;
-    fwrite(&new_call, sizeof(uint32_t), 1, game);
+void loader_loop() {
+
+    printf("Input the file path to %s\n", GAME_NAME);
+    char input[MAX_STRING];
+    fgets(input, 200, stdin);
+    newline_remover(input);
+    strcat(input, "\\");
+    strcat(input, GAME_NAME);
+    printf("%s\n", input);
+    FILE *game;
+    if (game = fopen(input, "rb+")){
+    } else{
+        printf("Invalid filename\n");
+        return;
+    }
+    fseek(game, SECTION_OFFSET, SEEK_SET);
+    short sections;
+    fread(&sections, 2, 1, game);
+    printf("Sections found = %d\n", sections);
+    
+    if(sections == DEFAULT_SECTIONS){
+        default_prompt:
+        printf("Default amount of sections in PE found. Would you like to run the mod initializer?\n(y / n)\n");
+        fgets(input, 10, stdin);
+        newline_remover(input);
+        if(input[0] != 'y' && input[0] != 'n'){
+            printf("Invalid option type y or n\n");
+            goto default_prompt;
+        }else if(input[0] == 'y'){
+            mod_bootloader(game);
+        }else{
+            goto finish;
+        }
+    }
+    char old_path[256];
+    getcwd(old_path, 256);
+    mod_loop:; //C syntax (╯°□°)╯︵ ┻━┻
+    unsigned char more_prompt = prompt_user("This file has already been modded. Would you like to add more mods?\n");
+    if(!more_prompt) {
+        goto finish;
+    }
+    printf("Input the file path to the mod folder (path must be <200 characters)\n");
+    fgets(input, 200, stdin);
+    newline_remover(input);
+    if(chdir(input) != 0) {
+        printf("Invalid path. Include the full path\n");
+        goto mod_loop;
+    }
+    load_mod(game);
+    chdir(old_path);
+    goto mod_loop;
+finish:
+    fclose(game);
+    printf(":3\n");
+}
+
+COMMAND get_cli_input(char* buf, int size) {
+    fgets(buf, size, stdin);
+    newline_remover(buf);
+    if(strcmp(buf, "h") == 0 || strcmp(buf, "help") == 0) {
+        return HELP;
+    }
+    if(strcmp(buf, "l") == 0 || strcmp(buf, "loader") == 0) {
+        return LOAD;
+    }
+    if(strcmp(buf, "g") == 0 || strcmp(buf, "generator") == 0) {
+        return GENERATE;
+    }
+    if(strcmp(buf, "q") == 0 || strcmp(buf, "quit") == 0) {
+        return EXIT;
+    }
+    return ERROR;
+}
+
+void process_input(char* buf, COMMAND type) {
+    switch (type)
+    {
+    case EXIT:
+        exit(0);
+        break;
+    case HELP:
+        printf("h help - Displays this page\n");
+        printf("q quit - Terminates DKCedit\n");
+        printf("l loader - Launches the loader\n");
+        printf("g generator - Launches the generator\n");
+        break;
+    case GENERATE:
+        printf("UNDER CONSTRUCTION\n");
+        break;
+    case LOAD:
+        loader_loop();
+        break;
+    default:
+        printf("Unknown command. Type h or help for information\n");
+        break;
+    }
 }
