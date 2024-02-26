@@ -48,6 +48,8 @@ void load_mod(FILE* game);
 
 void loader_loop();
 
+void generator_loop();
+
 COMMAND get_cli_input(char* buf, int size);
 
 void process_input(char* buf, COMMAND type);
@@ -382,6 +384,70 @@ finish:
     printf(":3\n");
 }
 
+void generator_loop() {
+    char old_path[0x100];
+    getcwd(old_path, 0x100);
+    char mod_path[0x100];
+    char* code_name = NULL;
+    char** patch_names;
+    int patch_count;
+    printf("Enter the filepath to the mod files\n");
+    fgets(mod_path, 0x100, stdin);
+    newline_remover(mod_path);
+    chdir(mod_path);
+    if(prompt_user("Does this mod need to compile code?\n")) {
+        printf("Enter the mod name\n");
+        code_name = calloc(1, 0x100);
+        fgets(code_name, 0x100, stdin);
+        newline_remover(code_name);
+    }
+    if(prompt_user("Does this mod have patches?\n")) {
+        char patch_count_buf[0x100];
+        invalid_number:
+        printf("How many patches\n");
+        fgets(patch_count_buf, 0x100, stdin);
+        if (sscanf(patch_count_buf, "%d", &patch_count) != 1) {
+            printf("Not a decimal number\n");
+            goto invalid_number;
+        }
+        patch_names = malloc(patch_count * sizeof(char*));
+        for(int i = 0; i < patch_count; i++) {
+            char name_temp[0x100];
+            printf("Input the name for patch %d\n", patch_count);
+            fgets(name_temp, 0x100, stdin);
+            char* new_name = malloc(sizeof(name_temp));
+            strcpy(new_name, name_temp);
+            patch_names[i] = new_name;
+        }
+    }
+    CODE_POSITION exec_order;
+    invalid_order:
+    char order_buf[0x100];
+    printf("When should the code run (f = First, m = Middle, l = last)");
+    fgets(order_buf, 0x100, stdin);
+    if(order_buf[0] == 'f') {
+        exec_order = RUN_FIRST;
+    } else if (order_buf[0] == 'm') {
+        exec_order = RUN_MIDDLE;
+    } else if (order_buf[0] == 'l') {
+        exec_order = RUN_LAST;
+    } else {
+        goto invalid_order;
+    }
+
+    generate_binary(exec_order, patch_count, code_name, patch_names);
+    free(code_name);
+    if(patch_count == 0) {
+        goto free_finish;
+    }
+
+    for(int i = 0; i < patch_count; i++) {
+        free(patch_names[i]);
+    }
+    free(patch_names);
+    free_finish:
+}
+
 COMMAND get_cli_input(char* buf, int size) {
     fgets(buf, size, stdin);
     newline_remover(buf);
@@ -413,7 +479,7 @@ void process_input(char* buf, COMMAND type) {
         printf("g generator - Launches the generator\n");
         break;
     case GENERATE:
-        printf("UNDER CONSTRUCTION\n");
+        generator_loop();
         break;
     case LOAD:
         loader_loop();

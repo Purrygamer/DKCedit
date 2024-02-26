@@ -8,6 +8,8 @@
 #define PATCH_HEADER ".PTH"
 #define END_OF_FILE_MARK ".EOF"
 
+void generate_binary(CODE_POSITION run_position, int patch_count, char* mod_name, char** mod_list);
+
 typedef enum CODE_POSITION{
     RUN_FIRST,
     RUN_MIDDLE,
