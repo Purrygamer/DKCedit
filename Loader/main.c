@@ -390,7 +390,7 @@ void generator_loop() {
     char mod_path[0x100];
     char* code_name = NULL;
     char** patch_names;
-    int patch_count;
+    int patch_count = 0;
     printf("Enter the filepath to the mod files\n");
     fgets(mod_path, 0x100, stdin);
     newline_remover(mod_path);
@@ -421,8 +421,8 @@ void generator_loop() {
         }
     }
     CODE_POSITION exec_order;
-    invalid_order:
     char order_buf[0x100];
+    invalid_order:
     printf("When should the code run (f = First, m = Middle, l = last)");
     fgets(order_buf, 0x100, stdin);
     if(order_buf[0] == 'f') {
@@ -438,14 +438,13 @@ void generator_loop() {
     generate_binary(exec_order, patch_count, code_name, patch_names);
     free(code_name);
     if(patch_count == 0) {
-        goto free_finish;
+        return;
     }
 
     for(int i = 0; i < patch_count; i++) {
         free(patch_names[i]);
     }
     free(patch_names);
-    free_finish:
 }
 
 COMMAND get_cli_input(char* buf, int size) {

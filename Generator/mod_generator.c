@@ -30,6 +30,12 @@ const char* ending_code[11] = {
 	"ret\n\t", 
 };
 
+void insert_run_first(FILE* original_source, FILE* gen_source);
+
+void insert_run_middle(FILE* original_source, FILE* gen_source);
+
+void insert_run_last(FILE* original_source, FILE* gen_source);
+
 void generate_binary(CODE_POSITION run_position, int patch_count, char* mod_name, char** mod_list) {
     FILE* mod_binary;
     mod_binary = fopen("mod.bin", "w+");
@@ -55,26 +61,16 @@ void generate_binary(CODE_POSITION run_position, int patch_count, char* mod_name
             printf("Invalid path for the file\n");
             goto compile_done;
         }
-        char file_buffer[MAX_PATH];
-        while(fgets(file_buffer, MAX_PATH, original_source) != NULL) {
-            if(strcmp(file_buffer, "mod_main:\n") == 0){
-                fwrite(file_buffer, strlen(file_buffer), 1, gen_source);
-                printf("mod_main found\n");
-                for(int i = 0; i < 15; i++){
-                    fwrite(header_code[i], strlen(header_code[i]), 1, gen_source);
-                }
-            }
-            else if(strcmp(file_buffer, "\t.seh_endproc\n") == 0) {
-                printf("End of code found\n");
-                fseek(gen_source, -5, SEEK_CUR); //moves back to the start of the ret\n line
-                for(int i = 0; i < 25; i++){
-                    fwrite(ending_code[i], strlen(ending_code[i]), 1, gen_source);
-                }
-                fwrite(file_buffer, strlen(file_buffer), 1, gen_source);
-            }
-            else {
-                fwrite(file_buffer, strlen(file_buffer), 1, gen_source);
-            }
+        switch(run_position) {
+            case RUN_MIDDLE:
+            insert_run_middle(original_source, gen_source);
+            break;
+            case RUN_LAST:
+            insert_run_last(original_source, gen_source);
+            break;
+            default:
+            insert_run_first(original_source, gen_source);
+            break;
         }
         fclose(original_source);
         fclose(gen_source);
@@ -152,7 +148,7 @@ void generate_binary(CODE_POSITION run_position, int patch_count, char* mod_name
     size_t code_bytes_read = fread(code_buf, 1, code_size, code);
     if(code_bytes_read != code_size) {
         perror("Error reading code.bin");
-        close(code);
+        fclose(code);
         free(code_buf);
         goto compile_done;
     }
@@ -160,13 +156,13 @@ void generate_binary(CODE_POSITION run_position, int patch_count, char* mod_name
     fwrite(code_buf, 1, code_size, mod_binary);
     free(code_buf);
     fclose(code);
-    compile_done:
     }
+    compile_done:
     if(patch_count){
         printf("Adding %d patches to mod file\n", patch_count);
     } else {
         printf("No patches\n");
-        return;
+        goto close_all;
     }
     for(int i = 0; i < patch_count; i++) {
         char* cur_patch = mod_list[i];
@@ -199,8 +195,90 @@ void generate_binary(CODE_POSITION run_position, int patch_count, char* mod_name
         fclose(patch_file);
     }
     char end_buf[0x10];
+    close_all:
     strcpy(end_buf, END_OF_FILE_MARK);
     fwrite(end_buf, sizeof(END_OF_FILE_MARK), 1, mod_binary);
     fclose(mod_binary);
+    printf("Mod binary generated. Returning to DKCedit main menu\n");
     return;
+}
+
+void insert_run_first(FILE* original_source, FILE* gen_source) {
+    char file_buffer[MAX_PATH];
+    while(fgets(file_buffer, MAX_PATH, original_source) != NULL) {
+        if(strcmp(file_buffer, "mod_main:\n") == 0){
+            fwrite(file_buffer, strlen(file_buffer), 1, gen_source);
+            printf("mod_main found\n");
+            for(int i = 0; i < 15; i++){
+                fwrite(header_code[i], strlen(header_code[i]), 1, gen_source);
+            }
+        }
+        else if(strcmp(file_buffer, "\t.seh_endproc\n") == 0) {
+            printf("End of code found\n");
+            fseek(gen_source, -5, SEEK_CUR); //moves back to the start of the ret\n line
+            for(int i = 0; i < 14; i++){ //Restore original register states
+                fwrite(pop_code[i], strlen(pop_code[i]), 1, gen_source);
+            }
+            for(int i = 0; i < 11; i++){ //Fiddle with the stack to make the game work correctly
+                fwrite(ending_code[i], strlen(ending_code[i]), 1, gen_source);
+            }
+            fwrite(file_buffer, strlen(file_buffer), 1, gen_source);
+        }
+        else {
+            fwrite(file_buffer, strlen(file_buffer), 1, gen_source);
+        }
+    }
+}
+
+void insert_run_middle(FILE* original_source, FILE* gen_source) {
+    //Almost identical to the run_first, but no chicanery has to be done to call the original function
+    char file_buffer[MAX_PATH];
+    while(fgets(file_buffer, MAX_PATH, original_source) != NULL) {
+        if(strcmp(file_buffer, "mod_main:\n") == 0){
+            fwrite(file_buffer, strlen(file_buffer), 1, gen_source);
+            printf("mod_main found\n");
+            for(int i = 0; i < 15; i++){
+                fwrite(header_code[i], strlen(header_code[i]), 1, gen_source);
+            }
+        }
+        else if(strcmp(file_buffer, "\t.seh_endproc\n") == 0) {
+            printf("End of code found\n");
+            fseek(gen_source, -5, SEEK_CUR); //moves back to the start of the ret\n line
+            for(int i = 0; i < 14; i++){ //Restore original register states
+                fwrite(pop_code[i], strlen(pop_code[i]), 1, gen_source);
+            }
+            fwrite(file_buffer, strlen(file_buffer), 1, gen_source);
+        }
+        else {
+            fwrite(file_buffer, strlen(file_buffer), 1, gen_source);
+        }
+    }
+}
+
+void insert_run_last(FILE* original_source, FILE* gen_source) {
+    //Similar to the other functions, but this one calls the original function before doing anything
+        char file_buffer[MAX_PATH];
+    while(fgets(file_buffer, MAX_PATH, original_source) != NULL) {
+        if(strcmp(file_buffer, "mod_main:\n") == 0){
+            fwrite(file_buffer, strlen(file_buffer), 1, gen_source);
+            printf("mod_main found\n");
+            for(int i = 0; i < 11; i++){ //Fiddle with the stack to make the game work correctly
+                fwrite(ending_code[i], strlen(ending_code[i]), 1, gen_source);
+            }
+            for(int i = 0; i < 15; i++){
+                fwrite(header_code[i], strlen(header_code[i]), 1, gen_source);
+            }
+        }
+        else if(strcmp(file_buffer, "\t.seh_endproc\n") == 0) {
+            printf("End of code found\n");
+            fseek(gen_source, -5, SEEK_CUR); //moves back to the start of the ret\n line
+            for(int i = 0; i < 14; i++){ //Restore original register states
+                fwrite(pop_code[i], strlen(pop_code[i]), 1, gen_source);
+            }
+            fwrite(file_buffer, strlen(file_buffer), 1, gen_source);
+        }
+        else {
+            fwrite(file_buffer, strlen(file_buffer), 1, gen_source);
+        }
+    }
 }
