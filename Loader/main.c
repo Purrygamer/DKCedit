@@ -132,6 +132,27 @@ int main(int argc, char* argv[]){
     }
 }
 
+void load_patch(FILE* game, FILE* mod){
+    //Patches are extra destructive. Only write these if you know what you are doing.
+    uint32_t phys_location;
+    uint32_t patch_size;
+    fread(&phys_location, sizeof(uint32_t), 1, mod);
+    fread(&patch_size, sizeof(uint32_t), 1, mod);
+    printf("Patch is going to %x and is %x bytes\n");
+    long int current_pos = ftell(game);
+    if(current_pos == -1L) {
+        perror("File position error (patch)");
+        return;
+    }
+    fseek(game, phys_location, SEEK_SET);
+    char* patch_buffer = malloc(patch_size);
+    fread(patch_buffer, patch_size, 1, mod); //Write the whole thing in one go
+    fwrite(patch_buffer, patch_size, 1, game);
+    fseek(game, current_pos, SEEK_SET); //Go back to where file was
+    free(patch_buffer);
+    printf("patch written\n");
+}
+
 uint8_t check_nop_rax(uint8_t buffer[4]){
     return buffer[0] == 0x48 && buffer[1] == 0x0F && buffer[2] == 0x1F && buffer[3] == 0xC0;
 }
@@ -151,31 +172,48 @@ void shuffle_nop_finder(uint8_t buffer[4], uint8_t new_val) {
     buffer[3] = new_val;
 }
 
-void load_mod(FILE* game){
-    FILE* variables;
-    FILE* functions;
-    FILE* mod;
+
+void load_new_code(FILE* game, FILE* mod) {
     uint8_t cur_byte;
     uint32_t new_code_start;
     uint32_t cur_instruction_addr;
     uint32_t file_address;
-    printf("Checking if mod files exist... ");
-    if (variables = fopen("variables.txt", "r")){
-    } else{
-        printf("Missing or corrupted variables.txt file\n");
-        return;
+    uint32_t* variables;
+    uint32_t* functions;
+    uint16_t variable_amt;
+    uint16_t cur_var = 0;
+    uint16_t function_amt;
+    uint16_t cur_fun = 0;
+    char section_buf[0x10];
+    uint32_t expected_size;
+    printf("Reading variable count... ");
+    fread(&variable_amt, sizeof(uint16_t), 1, mod);
+    printf("%d. Loading the variables... \n", variable_amt);
+    variables = malloc(variable_amt * sizeof(uint32_t));
+    fread(variables, sizeof(uint32_t), variable_amt, mod);
+
+    printf("ok\nChecking next section for functions... ");
+    fread(section_buf, sizeof(FUNCTION_HEADER), 1, mod);
+    if(strcmp(section_buf, FUNCTION_HEADER) != 0) {
+        printf("Function header not found, mod loading failed\n");
+        free(variables);
+        exit(0);
     }
-    if (functions = fopen("functions.txt", "r")){
-    } else{
-        printf("Missing or corrupted functions.txt file\n");
-        return;
+    printf("ok\nReading function count... ");
+    fread(&function_amt, sizeof(uint16_t), 1, mod);
+    printf("%d. Loading the functions... ", function_amt);
+    functions = malloc(function_amt * sizeof(uint32_t));
+    fread(functions, sizeof(uint32_t), function_amt, mod);
+    printf("ok\nChecking next section for code... ");
+    fread(section_buf, sizeof(MOD_HEADER), 1, mod);
+    if(strcmp(section_buf, MOD_HEADER) != 0) {
+        printf("Mod header not found, mod loading failed\n");
+        free(variables);
+        free(functions);
+        exit(0);
     }
-    if (mod = fopen("mod.bin", "rb+")){
-    } else{
-        printf("Missing or corrupted mod.bin file\n");
-        return;
-    }
-    printf("ok\n");
+    fread(&expected_size, sizeof(uint32_t), 1, mod);
+    printf("ok. size %x\n", expected_size);
     printf("Looking for spot in dkkstm.exe to place code...");
     fseek(game, MOD_SIZE_ADDR, SEEK_SET);
     uint32_t space_used;
@@ -187,7 +225,9 @@ void load_mod(FILE* game){
     uint8_t nop_finder[4];
     printf("Writing mod code...");
     fseek(game, DEFAULT_MOD_START + space_used, SEEK_SET);
-    while(fread(&cur_byte, 1, 1, mod) == 1) {
+    uint32_t counted_bytes = 0;
+    while(counted_bytes < expected_size) {
+        fread(&cur_byte, 1, 1, mod);
         shuffle_nop_finder(nop_finder, cur_byte);
         if(check_nop_rax(nop_finder)) {
             //Don't forget the last nop byte
@@ -195,24 +235,17 @@ void load_mod(FILE* game){
             space_used++;
             cur_instruction_addr++;
             file_address++;
+            counted_bytes++;
             //Put in call (0xE8) byte
             fread(&cur_byte, 1, 1, mod);
             fwrite(&cur_byte, 1, 1, game);
             space_used++;
             cur_instruction_addr++;
             file_address++;
+            counted_bytes++;
             //Do call instruction
-            char call_virt[255];
-            if(fgets(call_virt, 255, functions) == NULL){
-                printf("Incomplete (or corrupted) functions file. Mod failed to install (space was still used)\n");
-                goto mod_end;
-            }
-            char *end;
-            uint32_t target_call = (uint32_t)strtoul(call_virt, &end, 16);
-            if (*end != '\0' && *end != '\n') {
-                printf("Invalid formatting in functions file. Mod failed to install (space was still used)\n");
-                goto mod_end;
-            }
+            uint32_t target_call = functions[cur_fun];
+            cur_fun++;
             int call_offset = target_call - (cur_instruction_addr + 4);
             fwrite(&call_offset, sizeof(int), 1, game);
             int discard;
@@ -221,40 +254,36 @@ void load_mod(FILE* game){
             space_used += 4;
             cur_instruction_addr += 4;
             file_address += 4;
+            counted_bytes += 4;
         } else if (check_nop_rbx(nop_finder)) {
             //Don't forget the last nop byte
             fwrite(&cur_byte, 1, 1, game);
             space_used++;
             cur_instruction_addr++;
             file_address++;
+            counted_bytes++;
             //First three bytes of mov inst
             fread(&cur_byte, 1, 1, mod);
             fwrite(&cur_byte, 1, 1, game);
             space_used++;
             cur_instruction_addr++;
             file_address++;
+            counted_bytes++;
             fread(&cur_byte, 1, 1, mod);
             fwrite(&cur_byte, 1, 1, game);
             space_used++;
             cur_instruction_addr++;
             file_address++;
+            counted_bytes++;
             fread(&cur_byte, 1, 1, mod);
             fwrite(&cur_byte, 1, 1, game);
             space_used++;
             cur_instruction_addr++;
             file_address++;
+            counted_bytes++;
             //Do variable
-            char var_virt[255];
-            if(fgets(var_virt, 255, variables) == NULL){
-                printf("Incomplete (or corrupted) variables file. Mod failed to install (space was still used)\n");
-                goto mod_end;
-            }
-            char *end;
-            uint32_t target_var = (uint32_t)strtoul(var_virt, &end, 16);
-            if (*end != '\0' && *end != '\n') {
-                printf("Invalid formatting in variables file. Mod failed to install (space was still used)\n");
-                goto mod_end;
-            }
+            uint32_t target_var = variables[cur_var];
+            cur_var++;
             int var_offset = target_var - (cur_instruction_addr + 4);
             fwrite(&var_offset, sizeof(int), 1, game);
             int discard;
@@ -263,55 +292,82 @@ void load_mod(FILE* game){
             space_used += 4;
             cur_instruction_addr += 4;
             file_address += 4;
+            counted_bytes += 4;
 
         } else if(check_nop_rcx(nop_finder)) {
             fwrite(&cur_byte, 1, 1, game);
             space_used++;
             cur_instruction_addr++;//finish out nop
             file_address++;
+            counted_bytes++;
             printf("Replacing old call pointer...");
-            char physical_buffer[255];
-            char virtual_buffer[255];
-            if(fgets(physical_buffer, 255, functions) == NULL){
-                printf("Incomplete (or corrupted) functions file. Mod failed to install (space was still used)\n");
-                goto mod_end;
-            }
-            if(fgets(virtual_buffer, 255, functions) == NULL){
-                printf("Incomplete (or corrupted) functions file. Mod failed to install (space was still used)\n");
-                goto mod_end;
-            }
-            char *endptr;
-            uint32_t target_address = (uint32_t)strtoul(virtual_buffer, &endptr, 16);
-            if (*endptr != '\0' && *endptr != '\n') {
-                printf("Invalid formatting in functions file. Mod failed to install (space was still used)\n");
-                goto mod_end;
-            }
-            uint32_t physical_address = (uint32_t)strtoul(physical_buffer, &endptr, 16);
-            if (*endptr != '\0' && *endptr != '\n') {
-                printf("Invalid formatting in functions file. Mod failed to install (space was still used)\n");
-                goto mod_end;
-            }
+            uint32_t target_address = functions[cur_fun];
+            printf("Target: %x |", functions[cur_fun]);
+            cur_fun++;
+            uint32_t physical_address = functions[cur_fun];
+            printf(" Physical: %x |", functions[cur_fun]);
+            cur_fun++;
             fseek(game, physical_address, SEEK_SET);
             int offset = cur_instruction_addr - target_address;
             fwrite(&offset, sizeof(int), 1, game);
-            printf("%x\n", offset);
+            printf(" Cal: %x\n", offset);
             fseek(game, file_address, SEEK_SET);
         } else{
             fwrite(&cur_byte, 1, 1, game);
             space_used++;
             cur_instruction_addr++;
             file_address++;
+            counted_bytes++;
         }
     }
     printf("ok\n");
     mod_end:
-    printf("Mod injected, closing files\n");
+    free(variables);
+    free(functions);
+    printf("Mod injected\n");
     fseek(game, MOD_SIZE_ADDR, SEEK_SET);
     fwrite(&space_used, sizeof(uint32_t), 1, game);
-    fclose(mod);
-    fclose(functions);
-    fclose(variables);
     return;
+}
+
+void load_mod(FILE* game){
+    FILE* mod;
+    printf("Checking if mod.bin exists... ");
+    if (mod = fopen("mod.bin", "rb+")){
+    } else{
+        printf("Missing or corrupted mod.bin file\n");
+        return;
+    }
+    printf("ok\n");
+
+    printf("Verifying that mod.bin is a DKCedit binary... ");
+    char header_check[0x10];
+    fread(header_check, sizeof(FILE_HEADER), 1, mod);
+    if(strcmp(header_check, FILE_HEADER) != 0) {
+        printf("mod.bin is not in a DKCedit supported format. Abandoning attempt to load mod\n");
+        fclose(mod);
+        return;
+    }
+    printf("ok\n");
+    while(1) {
+        printf("Checking next section of file... ");
+        char section_header[0x10];
+        if(fread(section_header, sizeof(END_OF_FILE_MARK), 1, mod) == 0) {
+            printf("Bruh\n");
+            break;
+        }
+        if(strcmp(section_header, PATCH_HEADER) == 0) {
+            printf("Patch\n");
+            load_patch(game, mod);
+        }else if(strcmp(section_header, VARIABLE_HEADER) == 0) {
+            printf("variables\n");// This one should ALWAYS come first for a code mod. If you use the provided generator this will not be an issue.
+            load_new_code(game, mod);
+        }else if(strcmp(section_header, END_OF_FILE_MARK) == 0) {
+            printf("end of file\n");
+            break;
+        }
+    }
+    fclose(mod);
 }
 
 unsigned char prompt_user(char* text) {
